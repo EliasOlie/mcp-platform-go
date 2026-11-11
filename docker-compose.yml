@@ -1,0 +1,76 @@
+services:
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    image: eliasolie-auth-service:latest
+    restart: unless-stopped
+    ports:
+      - "${AUTH_PORT:-8081}:8081"
+    environment:
+      PORT: 8081
+      DATABASE_URL: ${DATABASE_URL:-postgresql://app_janus_local_admin:CHANGE_ME@db.example.com:6432/app_janus_local?sslmode=disable}
+      ADMIN_MASTER_KEY: ${ADMIN_MASTER_KEY:-eo_master_secret_key_change_me_in_prod}
+      AUTH_ISSUER: ${AUTH_ISSUER:-https://auth.example.com}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-eliasolie-platform}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - core-net
+
+  janus:
+    build:
+      context: ./janus
+      dockerfile: Dockerfile
+    image: eliasolie-janus:latest
+    restart: unless-stopped
+    # Porta interna na rede core-net (sem expor para o mundo exterior)
+    expose:
+      - "3030"
+    environment:
+      PORT: 3030
+      DATABASE_URL: ${DATABASE_URL:-postgresql://app_janus_local_admin:CHANGE_ME@db.example.com:6432/app_janus_local?sslmode=disable}
+      AI_GATEWAY_URL: ${AI_GATEWAY_URL:-https://vpsql.example.com}
+      AI_GATEWAY_KEY: ${AI_GATEWAY_KEY:-vpsql_sk_live_fa2b0f3f0f89954a76f967c88d7c2e47}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      SEARCH_TOP_K: ${SEARCH_TOP_K:-10}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3030/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - core-net
+
+  mcp-hub:
+    build:
+      context: ./mcp-hub
+      dockerfile: Dockerfile
+    image: eliasolie-mcp-hub:latest
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-8082}:8082"
+    environment:
+      PORT: 8082
+      AUTH_SERVICE_URL: http://auth-service:8081
+      JANUS_SERVICE_URL: http://janus:3030
+      PUBLIC_URL: ${PUBLIC_URL:-https://mcp.example.com}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      janus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - core-net
+
+networks:
+  core-net:
+    driver: bridge
